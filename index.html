@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>Data Domain Browser</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      // Tailwind Play CDN config — keep it minimal
+      tailwind.config = {
+        theme: {
+          extend: {
+            boxShadow: {
+              'soft': '0 2px 10px rgba(0,0,0,0.08)',
+            }
+          }
+        }
+      }
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  </head>
+  <body class="min-h-screen bg-gray-50 text-gray-900">
+    <!-- Header / Filters -->
+    <header class="sticky top-0 z-10 bg-white/90 backdrop-blur border-b">
+      <div class="mx-auto max-w-full px-4 sm:px-6 lg:px-8">
+        <div class="py-4 flex items-center justify-between flex-wrap gap-4">
+          <h1 class="text-xl sm:text-2xl font-semibold tracking-tight">Data Domain Browser</h1>
+          <div id="csvStatus" class="text-sm text-gray-500">Loading CSV…</div>
+        </div>
+        <div class="pb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-6 gap-3">
+          <!-- Show only domains -->
+          <label class="inline-flex items-center gap-2 text-sm font-medium">
+            <input id="toggleDomainsOnly" type="checkbox" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+            Show only data domains
+          </label>
+
+          <!-- Brands -->
+          <div class="flex items-center gap-3">
+            <span class="text-sm font-semibold">Brands:</span>
+            <label class="inline-flex items-center gap-1 text-sm"><input id="brandAFI" type="checkbox" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"> AFI</label>
+            <label class="inline-flex items-center gap-1 text-sm"><input id="brandADG" type="checkbox" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"> ADG</label>
+            <label class="inline-flex items-center gap-1 text-sm"><input id="brandRH" type="checkbox" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"> RH</label>
+          </div>
+
+          <!-- Measures -->
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-semibold">Measures:</span>
+            <div class="inline-flex rounded-lg ring-1 ring-gray-300 overflow-hidden">
+              <button data-measure="Quality" class="measureBtn px-3 py-1.5 text-sm bg-gray-100">Quality</button>
+              <button data-measure="Accessibility" class="measureBtn px-3 py-1.5 text-sm">Accessibility</button>
+              <button data-measure="Timeliness" class="measureBtn px-3 py-1.5 text-sm">Timeliness</button>
+            </div>
+          </div>
+
+          <!-- Search -->
+          <div class="flex items-center gap-2">
+            <label for="searchInput" class="text-sm font-semibold">Search:</label>
+            <input id="searchInput" type="text" placeholder="Search domains or families…"
+              class="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm px-2 py-1.5">
+          </div>
+
+          <!-- Moat / Use Case -->
+          <div class="flex items-center gap-2">
+            <label for="moatSelect" class="text-sm font-semibold">Moat:</label>
+            <select id="moatSelect" class="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm px-2 py-1.5">
+              <option value="">All</option>
+            </select>
+          </div>
+          <div class="flex items-center gap-2">
+            <label for="usecaseSelect" class="text-sm font-semibold">Use case:</label>
+            <select id="usecaseSelect" class="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm px-2 py-1.5" disabled>
+              <option value="">(Select Moat first)</option>
+            </select>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button id="resetBtn" class="inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm shadow-soft hover:bg-gray-50">Reset</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Content -->
+    <main class="mx-auto max-w-full px-4 sm:px-6 lg:px-8 py-6">
+      <div id="grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4"></div>
+      <p id="emptyState" class="hidden text-center text-gray-500 mt-12">No items match your filters.</p>
+    </main>
+
+    <footer class="mx-auto max-w-full px-4 sm:px-6 lg:px-8 pb-8 text-xs text-gray-400">
+      <p>Built with Tailwind (Play CDN) & Papa Parse. CSV columns are discovered dynamically at runtime.</p>
+    </footer>
+
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>
