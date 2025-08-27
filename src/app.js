@@ -1,19 +1,16 @@
 
-// Data Domain Browser
-// Loads ./data/data.csv and renders domain & family cards with filters
-
-import { slugify, uniqueBy } from './utils.js';
+import { slugify } from './utils.js';
 
 const state = {
   rows: [],
   columns: [],
   domainKey: null,
   familyKey: null,
-  brandKeys: [],         // e.g., ['AFI','ADG','RH']
+  brandKeys: [],
   measureKeys: { Quality: null, Accessibility: null, Timeliness: null },
-  moatKeys: [],          // e.g., ['MOAT 1','MOAT 2','MOAT 3']
-  usecaseKeys: [],       // e.g., ['1.1.1 ...', '2.4.1 ...']
-  measureActive: 'Quality',
+  moatKeys: [],
+  usecaseKeys: [],
+  measureActive: null,
   domainsOnly: false,
   selectedBrands: new Set(),
   searchText: '',
@@ -33,13 +30,11 @@ const el = {
   searchInput: document.getElementById('searchInput'),
   moatSelect: document.getElementById('moatSelect'),
   usecaseSelect: document.getElementById('usecaseSelect'),
-  resetBtn: document.getElementById('resetBtn'),
 };
 
 async function loadCsv() {
-  const url = './data/data.csv';
   return new Promise((resolve, reject) => {
-    Papa.parse(url, {
+    Papa.parse('./data/data.csv', {
       header: true,
       dynamicTyping: true,
       download: true,
@@ -50,49 +45,53 @@ async function loadCsv() {
   });
 }
 
-// Discover columns by name/patterns to keep this resilient to column changes.
+// Robust truthy evaluation
+function truthy(v) {
+  if (v === true) return true;
+  if (v === false) return false;
+  if (v == null) return false;
+  if (typeof v === 'number') return v !== 0;
+  const s = String(v).trim().toLowerCase();
+  if (s === '') return false;
+  return ['true','yes','y','1','x','✓','check','checked','t'].includes(s);
+}
+
 function discoverColumns(columns) {
-  const lower = new Set(columns.map(c => c.toLowerCase()));
-  const find = (...candidates) => candidates.find(c => lower.has(c.toLowerCase()));
+  const lower = new Map(columns.map(c => [c.toLowerCase(), c]));
+  const get = (...names) => {
+    for (const n of names) {
+      const k = lower.get(String(n).toLowerCase());
+      if (k) return k;
+    }
+    return undefined;
+  };
 
-  // Domain & Family
-  state.domainKey = find('Data Domain', 'Domain', 'DataDomain', 'Domain Name') || columns[0];
-  state.familyKey = find('Data Family', 'Data Product', 'Family', 'DataFamily') || columns[1];
+  state.domainKey = get('Data Domain', 'Domain', 'DataDomain', 'Domain Name') || columns[0];
+  state.familyKey = get('Data Family', 'Data Product', 'Family', 'DataFamily') || columns[1];
 
-  // Brands (3 classic columns)
-  state.brandKeys = ['AFI', 'ADG', 'RH'].filter(b => lower.has(b.toLowerCase()));
+  state.brandKeys = ['AFI','ADG','RH'].filter(b => lower.has(b.toLowerCase()));
 
-  // Measures
-  state.measureKeys.Quality = find('Quality');
-  state.measureKeys.Accessibility = find('Accessibility');
-  state.measureKeys.Timeliness = find('Timeliness');
+  state.measureKeys.Quality = get('Quality');
+  state.measureKeys.Accessibility = get('Accessibility');
+  state.measureKeys.Timeliness = get('Timeliness');
 
-  // MOAT columns are named like "MOAT 1", "MOAT 2"…
   state.moatKeys = columns.filter(c => /^moat\s*\d+/i.test(c));
-
-  // Use case columns start with something like "1.2.3 Some Title"
   state.usecaseKeys = columns.filter(c => /^\d+\.\d+(\.\d+)?\s+/i.test(c));
 
-  // Build moat select options
-  const moatMap = new Map(); // key: moat number string, value: {col, label}
-  for (const moatCol of state.moatKeys) {
-    const num = (moatCol.match(/(\d+)/) || [])[1] || '';
-    const labelByNum = {
-      '1': 'Moat 1: Supply Chain & Demand Planning',
-      '2': 'Moat 2: Warehouse & Distribution',
-      '3': 'Moat 3: Customer Success',
-    };
-    moatMap.set(num, { col: moatCol, label: labelByNum[num] || moatCol });
+  // Moat dropdown
+  const labelByNum = {
+    '1': 'Moat 1: Supply Chain & Demand Planning',
+    '2': 'Moat 2: Warehouse & Distribution',
+    '3': 'Moat 3: Customer Success',
+  };
+  const moatNums = state.moatKeys.map(c => (c.match(/(\d+)/) || [])[1]).filter(Boolean);
+  const uniqueNums = Array.from(new Set(moatNums)).sort();
+  for (const n of uniqueNums) {
+    const op = document.createElement('option');
+    op.value = String(n);
+    op.textContent = labelByNum[n] || `Moat ${n}`;
+    el.moatSelect.appendChild(op);
   }
-  // populate moat select
-  for (const [num, info] of moatMap) {
-    const opt = document.createElement('option');
-    opt.value = String(num);
-    opt.textContent = info.label;
-    el.moatSelect.appendChild(opt);
-  }
-
-  state._moatMap = moatMap; // keep internally
 }
 
 function setupEvents() {
@@ -101,80 +100,49 @@ function setupEvents() {
     render();
   });
 
-  // Brands
-  const brandInputs = [el.brandAFI, el.brandADG, el.brandRH].filter(Boolean);
-  brandInputs.forEach((inp, i) => {
+  [el.brandAFI, el.brandADG, el.brandRH].forEach((inp, i) => {
     if (!inp) return;
+    const name = ['AFI','ADG','RH'][i];
     inp.addEventListener('change', () => {
-      const brandName = ['AFI','ADG','RH'][i];
-      if (inp.checked) state.selectedBrands.add(brandName);
-      else state.selectedBrands.delete(brandName);
+      if (inp.checked) state.selectedBrands.add(name);
+      else state.selectedBrands.delete(name);
       render();
     });
   });
 
-  // Measures, only one active
+  // Measure toggle (click again to clear)
   el.measureBtns.forEach(btn => {
     btn.addEventListener('click', () => {
-      state.measureActive = btn.dataset.measure;
-      // toggle styles
-      el.measureBtns.forEach(b => b.classList.remove('bg-gray-100', 'font-medium'));
-      btn.classList.add('bg-gray-100', 'font-medium');
+      const m = btn.dataset.measure;
+      state.measureActive = (state.measureActive === m) ? null : m;
+      el.measureBtns.forEach(b => b.classList.remove('bg-gray-100','font-medium'));
+      if (state.measureActive) {
+        const active = el.measureBtns.find(b => b.dataset.measure === state.measureActive);
+        active?.classList.add('bg-gray-100','font-medium');
+      }
       render();
     });
   });
 
-  // Search
   el.searchInput.addEventListener('input', (e) => {
     state.searchText = e.target.value.trim().toLowerCase();
     render();
   });
 
-  // Moat select
   el.moatSelect.addEventListener('change', () => {
     state.moat = el.moatSelect.value;
-    // Rebuild use cases for this moat
-    rebuildUsecaseSelect();
+    rebuildUsecases();
     state.usecase = '';
     render();
   });
 
-  // Use case select
   el.usecaseSelect.addEventListener('change', () => {
     state.usecase = el.usecaseSelect.value;
     render();
   });
-
-  // Reset
-  el.resetBtn.addEventListener('click', () => {
-    // reset state
-    state.domainsOnly = false;
-    el.toggleDomainsOnly.checked = false;
-
-    state.selectedBrands.clear();
-    [el.brandAFI, el.brandADG, el.brandRH].forEach(inp => inp && (inp.checked = false));
-
-    state.measureActive = 'Quality';
-    el.measureBtns.forEach(b => {
-      b.classList.remove('bg-gray-100','font-medium');
-      if (b.dataset.measure === 'Quality') b.classList.add('bg-gray-100','font-medium');
-    });
-
-    state.searchText = '';
-    el.searchInput.value = '';
-
-    state.moat = '';
-    el.moatSelect.value = '';
-
-    state.usecase = '';
-    rebuildUsecaseSelect(); // will disable & show placeholder
-
-    render();
-  });
 }
 
-function rebuildUsecaseSelect() {
-  // Build use case options for selected moat
+function rebuildUsecases() {
   el.usecaseSelect.innerHTML = '';
   if (!state.moat) {
     el.usecaseSelect.disabled = true;
@@ -185,28 +153,24 @@ function rebuildUsecaseSelect() {
     return;
   }
   el.usecaseSelect.disabled = false;
-
-  // Filter usecase columns that start with the moat number and collect their names
   const prefix = state.moat + '.';
-  const list = state.usecaseKeys.filter(c => c.startsWith(prefix));
-
-  const allOpt = document.createElement('option');
-  allOpt.value = '';
-  allOpt.textContent = 'All use cases';
-  el.usecaseSelect.appendChild(allOpt);
-
-  for (const col of list) {
-    const opt = document.createElement('option');
-    opt.value = col; // use the column name for filtering
-    opt.textContent = col;
-    el.usecaseSelect.appendChild(opt);
+  const items = state.usecaseKeys.filter(c => c.startsWith(prefix));
+  const all = document.createElement('option');
+  all.value = '';
+  all.textContent = 'All use cases';
+  el.usecaseSelect.appendChild(all);
+  for (const col of items) {
+    const o = document.createElement('option');
+    o.value = col;
+    o.textContent = col;
+    el.usecaseSelect.appendChild(o);
   }
 }
 
 function filterRows() {
   let rows = state.rows;
 
-  // Text search (domain or family)
+  // Search
   if (state.searchText) {
     rows = rows.filter(r => {
       const d = String(r[state.domainKey] || '').toLowerCase();
@@ -215,129 +179,131 @@ function filterRows() {
     });
   }
 
-  // Brand filters (if any selected -> row must match at least one)
+  // Brands (any selected)
   if (state.selectedBrands.size > 0) {
-    rows = rows.filter(r => Array.from(state.selectedBrands).some(b => r[b] === true));
+    rows = rows.filter(r => Array.from(state.selectedBrands).some(b => truthy(r[b])));
   }
 
-  // Moat filter
+  // Moat
   if (state.moat) {
-    const moatCol = state._moatMap.get(state.moat)?.col;
-    if (moatCol) {
-      rows = rows.filter(r => Boolean(r[moatCol]));
-    }
+    const moatCol = state.moatKeys.find(c => (c.match(/(\d+)/) || [])[1] === state.moat);
+    if (moatCol) rows = rows.filter(r => truthy(r[moatCol]));
   }
 
-  // Usecase filter (acts within moat if chosen)
+  // Use case
   if (state.usecase) {
-    rows = rows.filter(r => Boolean(r[state.usecase]));
+    rows = rows.filter(r => truthy(r[state.usecase]));
   }
 
   return rows;
 }
 
 function hslForValue(val) {
-  // map 0..100 to red(0) -> yellow(60) -> green(120)
-  const v = Math.max(0, Math.min(100, Number(val)));
-  const hue = (v * 1.2); // 0..120
+  const n = Number(val);
+  if (!isFinite(n)) return null;
+  const v = Math.max(0, Math.min(100, n));
+  const hue = v * 1.2;   // 0..120
   const sat = 80;
-  const light = 90 - (v * 0.4); // keep readable
+  const light = 90 - v * 0.4;
   return `hsl(${hue}deg ${sat}% ${light}%)`;
 }
 
 function render() {
   const rows = filterRows();
-  // Group by domain
+
+  // Group by domain, omit falsy or "Other"
   const byDomain = new Map();
   for (const r of rows) {
-    const d = r[state.domainKey] || 'Other';
+    const d = String(r[state.domainKey] || '').trim();
+    if (!d || /^other$/i.test(d)) continue;
     if (!byDomain.has(d)) byDomain.set(d, []);
     byDomain.get(d).push(r);
   }
 
-  // Clear grid
   el.grid.innerHTML = '';
 
-  const domains = Array.from(byDomain.keys()).sort((a,b) => String(a).localeCompare(String(b)));
+  const domains = Array.from(byDomain.keys()).sort((a,b) => a.localeCompare(b));
 
   if (domains.length === 0) {
     el.empty.classList.remove('hidden');
+    el.status.textContent = `0 rows / 0 data domains shown`;
     return;
-  } else {
-    el.empty.classList.add('hidden');
   }
+  el.empty.classList.add('hidden');
 
   for (const domain of domains) {
     const children = byDomain.get(domain) || [];
-    // Deduplicate families inside a domain
+
+    // Dedup families
     const seen = new Set();
     const families = [];
     for (const row of children) {
-      const famName = row[state.familyKey];
-      if (!famName) continue;
-      if (!seen.has(famName)) {
-        seen.add(famName);
-        families.push(row); // keep the first representative row
+      const fam = String(row[state.familyKey] || '').trim();
+      if (!fam) continue;
+      if (!seen.has(fam)) {
+        seen.add(fam);
+        families.push(row);
       }
     }
 
     const card = document.createElement('section');
-    card.className = 'bg-white rounded-xl border shadow-soft p-4 flex flex-col';
+    card.className = 'bg-white rounded-xl border shadow-soft p-3 flex flex-col';
 
     // Header
     const header = document.createElement('div');
-    header.className = 'flex items-center gap-3 mb-3';
+    header.className = 'flex items-center gap-2 mb-2';
     const img = document.createElement('img');
-    img.alt = String(domain);
-    const slug = slugify(String(domain));
-    img.src = `./icons/${slug}.svg`;
-    img.className = 'w-10 h-10 rounded-lg ring-1 ring-gray-200 object-contain';
+    img.alt = domain;
+    img.src = `./icons/${slugify(domain)}.svg`;
+    img.className = 'w-8 h-8 rounded-md ring-1 ring-gray-200 object-contain';
     img.onerror = () => { img.src = './icons/_placeholder.svg'; };
     const title = document.createElement('h2');
-    title.className = 'text-base font-semibold leading-tight';
-    title.textContent = String(domain);
+    title.className = 'text-sm font-semibold leading-snug';
+    title.textContent = domain;
     header.appendChild(img);
     header.appendChild(title);
     card.appendChild(header);
 
     if (!state.domainsOnly) {
-      // Families grid
       const famGrid = document.createElement('div');
-      famGrid.className = 'grid grid-cols-1 sm:grid-cols-2 gap-2';
+      famGrid.className = 'grid grid-cols-1 sm:grid-cols-2 gap-1.5';
       for (const row of families) {
         const fam = String(row[state.familyKey]);
 
         const tag = document.createElement('div');
-        tag.className = 'rounded-lg border px-3 py-2 text-sm leading-snug';
+        tag.className = 'rounded-lg border px-2 py-1.5 text-xs leading-snug break-words whitespace-normal';
 
-        // Measure coloring
-        const key = state.measureKeys[state.measureActive];
-        if (key && row[key] !== undefined && row[key] !== null && row[key] !== '') {
-          tag.style.backgroundColor = hslForValue(row[key]);
-          tag.title = `${state.measureActive}: ${row[key]}`;
+        if (state.measureActive) {
+          const key = state.measureKeys[state.measureActive];
+          const col = key ? hslForValue(row[key]) : null;
+          if (col) {
+            tag.style.backgroundColor = col;
+            tag.title = `${state.measureActive}: ${row[key]}`;
+          } else {
+            tag.style.backgroundColor = '';
+            tag.removeAttribute('title');
+          }
+        } else {
+          tag.style.backgroundColor = '';
+          tag.removeAttribute('title');
         }
-
         tag.innerHTML = `<span class="font-medium">${fam}</span>`;
-
         famGrid.appendChild(tag);
       }
-
       card.appendChild(famGrid);
     } else {
-      // Domains-only view — center icon + subtle hint
       const center = document.createElement('div');
-      center.className = 'flex-1 flex items-center justify-center py-6';
-      const placeholder = document.createElement('div');
-      placeholder.className = 'text-xs text-gray-400';
-      placeholder.textContent = 'Data Families hidden';
-      center.appendChild(placeholder);
+      center.className = 'flex-1 flex items-center justify-center py-4';
+      const note = document.createElement('div');
+      note.className = 'text-[11px] text-gray-400';
+      note.textContent = 'Data Families hidden';
+      center.appendChild(note);
       card.appendChild(center);
     }
 
     el.grid.appendChild(card);
   }
 
-  // Status
   el.status.textContent = `${rows.length} rows / ${domains.length} data domains shown`;
 }
 
@@ -348,13 +314,10 @@ async function init() {
     state.columns = meta.fields || Object.keys(data[0] || {});
     discoverColumns(state.columns);
     setupEvents();
-    // default active button style
-    el.measureBtns.find(b => b.dataset.measure === state.measureActive)?.classList.add('bg-gray-100','font-medium');
-    rebuildUsecaseSelect();
     render();
     el.status.textContent = `Loaded ${state.rows.length} rows from CSV`;
-  } catch (err) {
-    console.error(err);
+  } catch (e) {
+    console.error(e);
     el.status.textContent = 'Failed to load CSV';
   }
 }
